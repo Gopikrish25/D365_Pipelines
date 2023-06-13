@@ -1,0 +1,55 @@
+# 'Allow scripts to access the OAuth token' was selected in pipeline.  Add the following YAML to any steps requiring access:
+#       env:
+#           MY_ACCESS_TOKEN: $(System.AccessToken)
+jobs:
+- job: Job_1
+  displayName: Agent job 1
+  pool:
+    vmImage: windows-latest
+  steps:
+  - checkout: self
+    clean: true
+    fetchDepth: 1
+    persistCredentials: True
+  - task: PowerPlatformToolInstaller@2
+    displayName: 'Power Platform Tool Installer '
+  - task: PowerPlatformDownloadPaportal@2
+    displayName: 'Power Platform Download PAPortal '
+    inputs:
+      authenticationType: PowerPlatformSPN
+      PowerPlatformSPN: da8d3d6f-bb9e-4770-b6ca-8bca1360554c
+      Environment: https://operations-ste-weur-dev.crm4.dynamics.com
+      DownloadPath: Releases
+      WebsiteId: fe3a1a63-226b-ed11-9561-0022487fed95
+      Overwrite: true
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish Artifact: drop'
+    inputs:
+      PathtoPublish: Releases
+  - task: PowerShell@2
+    displayName: Commit the Release
+    inputs:
+      targetType: inline
+      script: >-
+        #Renames the Release Folder
+
+        $folderPath = ".\Releases\stephanus-kostenleistungsrechnung---stephanusd365klr"
+
+        $newFolderName = "stephanus-kostenleistungsrechnung---stephanusd365klr_$(Get-Date -Format 'yyyyMMdd')"
+
+        Rename-Item -Path $folderPath -NewName $newFolderName
+
+
+        #Commit the Release Folder Contents
+
+        git config --global user.email "vrohith@alphavsolutions.com"
+
+        git config --global user.name "vrohith”
+
+        git add .\Releases
+
+        git commit -am "New Release"
+
+        git push origin HEAD:dev
+...
+#Make Sure to provide the contribution permissions to the pipeline user

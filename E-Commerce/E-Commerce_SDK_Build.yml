@@ -1,0 +1,33 @@
+jobs:
+- job: Job_1
+  displayName: Agent job 1
+  pool:
+    vmImage: windows-2019
+  steps:
+  - checkout: self
+    fetchDepth: 1
+  - task: NodeTool@0
+    displayName: Use Node >=12.0.0
+    inputs:
+      versionSpec: '>=12.0.0'
+  - task: PowerShell@2
+    displayName: PowerShell Script
+    inputs:
+      targetType: inline
+      script: >-
+        yarn
+
+        yarn msdyn365 pack
+      workingDirectory: $(Build.SourcesDirectory)
+  - task: CopyFiles@2
+    displayName: 'Copy Files to: $(Build.SourcesDirectory)'
+    inputs:
+      SourceFolder: $(Build.SourcesDirectory)
+      Contents: '*.zip'
+      TargetFolder: $(Build.SourcesDirectory)
+  - task: PublishPipelineArtifact@1
+    displayName: Publish Pipeline Artifact
+    inputs:
+      path: $(Build.ArtifactStagingDirectory)
+      artifactName: drop
+...

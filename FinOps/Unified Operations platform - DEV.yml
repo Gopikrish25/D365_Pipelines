@@ -1,0 +1,151 @@
+# Variable 'DatabaseBackupToRestore' was defined in the Variables tab
+# Variable 'DependencyXml' was defined in the Variables tab
+# Variable 'DeployReports' was defined in the Variables tab
+# Variable 'GenerateEntityMapping' was defined in the Variables tab
+# Variable 'IncludeBinariesInRuntimePackage' was defined in the Variables tab
+# Variable 'ModelVersionExclusions' was defined in the Variables tab
+# Variable 'PackagingExclusions' was defined in the Variables tab
+# Variable 'SkipRuntimePackageGeneration' was defined in the Variables tab
+# Variable 'SkipSourcePackageGeneration' was defined in the Variables tab
+# Variable 'SkipSyncEngine' was defined in the Variables tab
+# Variable 'SyncEngineFallbackToNative' was defined in the Variables tab
+# Variable 'TestAssembly' was defined in the Variables tab
+# Variable 'TestFilter' was defined in the Variables tab
+trigger:
+  paths:
+    include:
+    - $/D365/Trunk/Dev
+name: $(Year:yyyy).$(Month).$(DayOfMonth)$(Rev:.r)
+resources:
+  repositories:
+  - repository: self
+    type: git
+    ref: $/D365/Trunk/Dev
+jobs:
+- job: Phase_1
+  displayName: Agent job 1
+  timeoutInMinutes: 720
+  pool:
+    name: Default
+    demands:
+    - Agent.Name -equals VSTSAgent-MET-BUILD
+    - DynamicsSDK
+  steps:
+  - checkout: self
+    clean: true
+  - task: PowerShell@1
+    displayName: Prepare for build
+    inputs:
+      scriptName: $(DynamicsSDK)\PrepareForBuild.ps1
+      arguments: -DatabaseBackupToRestore "$(DatabaseBackupToRestore)" -Verbose
+  - task: PowerShell@1
+    displayName: Set Model Versions
+    inputs:
+      scriptName: $(DynamicsSDK)\UpdateModelBuildNumbers.ps1
+      arguments: -BuildMetadataPath "$(Build.SourcesDirectory)\Metadata" -BuildNumber "$(Build.BuildNumber)" -ModelExclusions "$(ModelVersionExclusions)"
+  - task: MSBuild@1
+    displayName: Build the solution
+    inputs:
+      solution: $/D365/Trunk/Dev/AXModulesBuild.proj
+      msbuildVersion: 15.0
+      msbuildArchitecture: x64
+      platform: $(BuildPlatform)
+      configuration: $(BuildConfiguration)
+      msbuildArguments: /p:OutputPath="$(Agent.BuildDirectory)\Bin" /p:LogPath="$(Agent.BuildDirectory)\Logs"
+      clean: true
+      logProjectEvents: true
+  - task: MSBuild@1
+    displayName: Database Sync
+    inputs:
+      solution: $(DynamicsSDK)\Metadata\SyncEngine.proj
+      msbuildVersion: 14.0
+      msbuildArchitecture: x64
+      platform: $(BuildPlatform)
+      configuration: $(BuildConfiguration)
+      msbuildArguments: /p:OutputPath="$(Agent.BuildDirectory)\Bin" /p:LogPath="$(Agent.BuildDirectory)\Logs" /p:FallbackToNative="$(SyncEngineFallbackToNative)" /p:GenerateEntityMapping="$(GenerateEntityMapping)"
+      logProjectEvents: true
+  - task: PowerShell@1
+    displayName: Deploy Reports
+    inputs:
+      scriptName: $(DynamicsSDK)\DeploySSRSReports.ps1
+      arguments: -DeployReports:([bool]$(DeployReports)) -Verbose
+  - task: PowerShell@1
+    displayName: Generate Packages
+    continueOnError: True
+    inputs:
+      scriptName: $(DynamicsSDK)\GeneratePackage.ps1
+      arguments: -BuildPackagePath "$(Agent.BuildDirectory)\Packages" -BuildBinPath "$(Agent.BuildDirectory)\Bin" -BuildMetadataPath "$(Build.SourcesDirectory)\Metadata" -BuildVersion "$(Build.BuildNumber)" -NoRuntime:([bool]$(SkipRuntimePackageGeneration)) -NoSource:([bool]$(SkipSourcePackageGeneration)) -Verbose -ExclusionList "$(PackagingExclusions)" -IncludeBinaries:([bool]$(IncludeBinariesInRuntimePackage))
+  - task: CopyFiles@2
+    displayName: 'Copy Files to: Staging Directory'
+    inputs:
+      SourceFolder: $(Agent.BuildDirectory)
+      Contents: Packages\*.zip
+      TargetFolder: $(Build.ArtifactStagingDirectory)
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish Artifact: Packages'
+    inputs:
+      PathtoPublish: $(Build.ArtifactStagingDirectory)\Packages
+      ArtifactName: Packages
+      TargetPath: '\\my\share\$(Build.DefinitionName)\$(Build.BuildNumber)'
+      FileCopyOptions: ''
+  - task: PowerShell@1
+    displayName: Test Setup
+    continueOnError: True
+    enabled: False
+    inputs:
+      scriptName: $(DynamicsSDK)\Test\TestStart.ps1
+      arguments: -BuildNumber "$(Build.SourceBranch)@$(Build.BuildNumber)"
+  - task: VSTest@2
+    displayName: Execute Tests
+    continueOnError: True
+    enabled: False
+    inputs:
+      testAssemblyVer2: $(TestAssembly)
+      searchFolder: $(Agent.BuildDirectory)\Bin\
+      testFiltercriteria: $(TestFilter)
+      vsTestVersion: 14.0
+      runInParallel: false
+      codeCoverageEnabled: true
+      otherConsoleOptions: /Platform:X64 /InIsolation /UseVsixExtensions:true
+      testRunTitle: Unit Test - $(Build.DefinitionName)
+      platform: $(BuildPlatform)
+      configuration: $(BuildConfiguration)
+      diagnosticsEnabled: True
+  - task: PowerShell@1
+    displayName: Test End
+    continueOnError: True
+    enabled: False
+    inputs:
+      scriptName: $(DynamicsSDK)\Test\TestEnd.ps1
+      arguments: -BuildNumber "$(Build.SourceBranch)@$(Build.BuildNumber)"
+  - task: PowerShell@2
+    displayName: Save AOS Service Version
+    inputs:
+      targetType: inline
+      script: >-
+        $AOSServicePath = "C:\DynamicsAX\InstallationRecords\ServiceModelInstallationRecords"
+
+        $AOSServiceFile = Get-ChildItem -Path $AOSServicePath -Filter "AOSService_Current.xml"
+
+        $AOSServiceVersion = (Select-Xml -XPath "/ServiceModelInstallationInfo/Version" -Path $AOSServiceFile.fullname).Node."#Text"
+
+        Write-Host "##vso[task.setvariable variable=AOS_ServiceVersion_Build]$AOSServiceVersion"
+  - task: variabledehydration@0
+    displayName: Save AOS Service in a variable
+    inputs:
+      prefixes: AOS
+      outpath: $(Build.ArtifactStagingDirectory)\AOSMetadata
+  - task: CopyFiles@2
+    displayName: 'Copy Files to: Staging Directory'
+    inputs:
+      SourceFolder: $(Agent.BuildDirectory)
+      Contents: Logs\**
+      TargetFolder: $(Build.ArtifactStagingDirectory)
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish Artifact: AOSMetadata'
+    inputs:
+      PathtoPublish: $(Build.ArtifactStagingDirectory)\AOSMetadata
+      ArtifactName: AOSMetadata
+      TargetPath: '\\my\share\$(Build.DefinitionName)\$(Build.BuildNumber)'
+      FileCopyOptions: ''
+...

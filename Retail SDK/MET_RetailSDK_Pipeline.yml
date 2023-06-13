@@ -1,0 +1,29 @@
+trigger:
+  branches:
+    include:
+    - refs/heads/main
+jobs:
+- job: Job_1
+  displayName: Agent job 1
+  pool:
+    name: D365
+    demands:
+    - Agent.Name -equals Commerce
+  steps:
+  - checkout: self
+    clean: true
+  - task: MSBuild@1
+    displayName: Build solution RetailSDK10.0.28/dirs.proj
+    inputs:
+      solution: RetailSDK10.0.28/dirs.proj
+      msbuildVersion: 15.0
+  - task: PowerShell@2
+    displayName: Copy Retail Deployable Package
+    inputs:
+      targetType: inline
+      script: Copy-Item "$(Build.SourcesDirectory)\RetailSDK10.0.28\Packages\RetailDeployablePackage\RetailDeployablePackage.zip" -Destination "$(Build.ArtifactStagingDirectory)\RetailDeployablePackage_$(Build.BuildNumber).zip"
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish Artifact: drop'
+    inputs:
+      FileCopyOptions: ''
+...

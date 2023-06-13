@@ -1,0 +1,53 @@
+trigger:
+  branches:
+    include:
+    - refs/heads/Dev
+name: $(Date:yyyyMMdd).$(Rev:r)
+jobs:
+- job: Job_1
+  displayName: Agent job 1
+  pool:
+    vmImage: windows-2019
+  steps:
+  - checkout: self
+    fetchDepth: 1
+  - task: PowerShell@2
+    displayName: Pre-Build Steps
+    inputs:
+      filePath: Pipeline/PowerShellScripts/Pre-Build.ps1
+  - task: NuGetToolInstaller@1
+    displayName: Use NuGet
+    inputs:
+      versionSpec: '>=5.4.0'
+  - task: NuGetCommand@2
+    displayName: NuGet restore
+    inputs:
+      selectOrConfig: config
+      nugetConfigPath: nuget.config
+  - task: VSBuild@1
+    displayName: Build solution MET.CommerceSDK/MET.CommerceSDK.sln
+    inputs:
+      solution: MET.CommerceSDK/MET.CommerceSDK.sln
+      vsVersion: 16.0
+  - task: PowerShell@2
+    displayName: ' Copy CSU files to Staging'
+    inputs:
+      targetType: inline
+      filePath: $(Build.SourcesDirectory)\Pipeline\PowerShellScripts\CSU_CopyFileToDestination.ps1
+      script: Copy-Item "$(Build.SourcesDirectory)\MET.CommerceSDK\MET.ScaleUnit\bin\Debug\netstandard2.0\CloudScaleUnitExtensionPackage.zip" -Destination "$(Build.ArtifactStagingDirectory)\MET.CSU_Installer_$(Build.BuildNumber).zip"
+  - task: PowerShell@2
+    displayName: Copy Installer files to Staging
+    inputs:
+      targetType: inline
+      script: Copy-Item "$(Build.SourcesDirectory)\MET.CommerceSDK/MET.CommerceInstaller/bin/Debug/net472/MET.CommerceInstaller.exe" -Destination "$(Build.ArtifactStagingDirectory)\MET.CommerceInstaller_$(Build.BuildNumber).exe"
+  - task: PowerShell@2
+    displayName: Copy CSU Installer to Staging
+    inputs:
+      targetType: inline
+      script: >
+        Copy-Item "$(Build.SourcesDirectory)\MET.CommerceSDK/MET.ScaleUnit.Installer/bin/Debug/net472/MET.ScaleUnit.Installer.exe" -Destination "$(Build.ArtifactStagingDirectory)\MET.ScaleUnit.Installer_$(Build.BuildNumber).exe"
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish Artifact: drop'
+    inputs:
+      FileCopyOptions: ''
+...
