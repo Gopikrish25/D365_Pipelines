@@ -1,16 +1,28 @@
+# 'Allow scripts to access the OAuth token' was selected in pipeline.  Add the following YAML to any steps requiring access:
+#       env:
+#           MY_ACCESS_TOKEN: $(System.AccessToken)
+# Variable Group 'MET Digital Cert Sign' was defined in the Variables tab
+# Agent Queue 'Azure Pipelines' was used with unrecognized Agent Specification, vmImage property must be specified to determine image - https://docs.microsoft.com/en-us/azure/devops/pipelines/agents/hosted?view=azure-devops&tabs=yaml#software
 trigger:
   branches:
     include:
-    - refs/heads/Dev
+    - refs/heads/Release
 name: $(Date:yyyyMMdd).$(Rev:r)
+resources:
+  repositories:
+  - repository: self
+    type: git
+    ref: refs/heads/Release
 jobs:
 - job: Job_1
   displayName: Agent job 1
   pool:
-    vmImage: windows-2019
+    name: Azure Pipelines
   steps:
   - checkout: self
+    clean: true
     fetchDepth: 1
+    persistCredentials: True
   - task: PowerShell@2
     displayName: Pre-Build Steps
     inputs:
@@ -28,7 +40,7 @@ jobs:
     displayName: Build solution MET.CommerceSDK/MET.CommerceSDK.sln
     inputs:
       solution: MET.CommerceSDK/MET.CommerceSDK.sln
-      vsVersion: 16.0
+      vsVersion: 17.0
   - task: PowerShell@2
     displayName: ' Copy CSU files to Staging'
     inputs:
@@ -36,7 +48,7 @@ jobs:
       filePath: $(Build.SourcesDirectory)\Pipeline\PowerShellScripts\CSU_CopyFileToDestination.ps1
       script: Copy-Item "$(Build.SourcesDirectory)\MET.CommerceSDK\MET.ScaleUnit\bin\Debug\netstandard2.0\CloudScaleUnitExtensionPackage.zip" -Destination "$(Build.ArtifactStagingDirectory)\MET.CSU_Installer_$(Build.BuildNumber).zip"
   - task: PowerShell@2
-    displayName: Copy Installer files to Staging
+    displayName: Copy POS Installer files to Staging
     inputs:
       targetType: inline
       script: Copy-Item "$(Build.SourcesDirectory)\MET.CommerceSDK/MET.CommerceInstaller/bin/Debug/net472/MET.CommerceInstaller.exe" -Destination "$(Build.ArtifactStagingDirectory)\MET.CommerceInstaller_$(Build.BuildNumber).exe"
@@ -46,8 +58,19 @@ jobs:
       targetType: inline
       script: >
         Copy-Item "$(Build.SourcesDirectory)\MET.CommerceSDK/MET.ScaleUnit.Installer/bin/Debug/net472/MET.ScaleUnit.Installer.exe" -Destination "$(Build.ArtifactStagingDirectory)\MET.ScaleUnit.Installer_$(Build.BuildNumber).exe"
+  - task: DotNetCoreCLI@2
+    displayName: Install AzureSignTool
+    inputs:
+      command: custom
+      custom: tool
+      arguments: install --global azuresigntool
+      verbosityRestore: Detailed
+      verbosityPack: Detailed
+  - task: PowerShell@2
+    displayName: Digital Sign Cert
+    inputs:
+      filePath: ./Pipeline/PowerShellScripts/CodeSign.ps1
+      arguments: -TenantId $(TenantId) -ApplicationId $(ApplicationId) -ApplicationSecretValue $(SecretValue) -AzureKeyVaultURI $(AzureKeyVaultURI) -CertificateName $(CertificateName) -Timestamp $(Timestamp) -TimestampDigest "sha256" -Files   "$(Build.ArtifactStagingDirectory)\MET.CommerceInstaller_$(Build.BuildNumber).exe $(Build.ArtifactStagingDirectory)\MET.ScaleUnit.Installer_$(Build.BuildNumber).exe"
   - task: PublishBuildArtifacts@1
     displayName: 'Publish Artifact: drop'
-    inputs:
-      FileCopyOptions: ''
 ...
